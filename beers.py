@@ -5,6 +5,7 @@ import requests
 import json
 
 mylcd = I2C_LCD_driver.lcd()
+server_address = '192.168.0.12'
 
 class PID:
     """
@@ -101,6 +102,8 @@ class display_stuff (Thread):
             second_line = 'c:' + str(beer.current_temp)[:4] + ' r:' + \
                           str(beer.pid_val)
 
+            print(first_line)
+            print(second_line)
             mylcd.lcd_clear()
             mylcd.lcd_display_string(first_line, 1)
             mylcd.lcd_display_string(second_line, 2)
@@ -126,11 +129,15 @@ class beer_info:
         self.pid_val = 0
         if (self.target_temp <= current_temp):
             self.pid_val = self.pid.update(current_temp)
+
+    def get_current(self):
+        return self.current_temp
             
 
 # get no of beers from server
-# beers_no = requests...
-beers_no = 2
+r = requests.get('http://' + server_address + ':8000/api/v1/fridge_shelves')
+beers_no = len(r.json())
+#print(beers_no)
 
 beer_dict = dict()
   
@@ -153,19 +160,25 @@ while(True):
         current = 10
 
     # update beer info
+    r = requests.get('http://' + server_address + ':8000/api/v1/fridge_shelves')
+    server_json = r.json()
     content = '[{"id": "0", "style": "IPA", "target_temp": "22"}, \
                 {"id": "1", "style": "Porter", "target_temp": "25"}]'
     raw_json = json.loads(content)
-    beer_json = {int(el["id"]): el for el in raw_json}
-    print(beer_json)
+    beer_json = {int(el["id"]): el for el in server_json}
+    #print(beer_json)
+    #print(server_json)
 
-    for i in range(beers_no):
+    for i in beer_json:
         if i in beer_json:
             if i in beer_dict:
-                beer_dict[i].update_target(float(beer_json[i]['target_temp']))
+                beer_dict[i].update_target(float(beer_json[i]['beer_info'] \
+                                         ['type_info']['serving_temperature']))
             else:
-                beer_dict[i] = beer_info(int(i), beer_json[i]['style'],
-                                         float(beer_json[i]['target_temp']))
+                beer_dict[i] = beer_info(int(i), beer_json[i]['beer_info'] \
+                                         ['type_info']['name'],
+                                         float(beer_json[i]['beer_info'] \
+                                         ['type_info']['serving_temperature']))
         else:
             if i in beer_dict:
                 del beer_dict[i]
@@ -176,6 +189,11 @@ while(True):
         beer.update_current(float(current)/1000)
 
     # send currents to server
+    for i in beer_json:
+        r = requests.patch('http://' + server_address +
+                           ':8000/api/v1/fridge_shelves/' + str(i) + '/',
+                       json = {'id': i,
+                               'current_temperature': beer_dict[i].current_temp})
 
     # set up thread to display data
     new_thread = display_stuff(beer_dict)
